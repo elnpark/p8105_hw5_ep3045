@@ -1,0 +1,103 @@
+---
+title: "p8105_hw5_ep3045"
+author: "Ellen Park"
+date: "2022-11-11"
+output: github_document
+---
+
+```{r, include = FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(purrr) 
+library(forcats)
+
+knitr::opts_chunk$set(collapse = TRUE, message = FALSE, dpi = 300, fig.width = 7)
+
+```
+
+# Problem 2 - Homicide Data
+
+```{r}
+homicide = 
+  read.csv("https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv") 
+```
+
+The raw data contains `r nrow(homicide)` rows of homicide observations and `r ncol(homicide)` variables: homicide ID, date, the victim's first and last name, age, sex, city, state, latitude, longitude, and disposition. 
+
+Dataframe with the total number of homicides and the number of unsolved homicides in each city:
+
+```{r}
+city = 
+  homicide %>%
+  mutate(
+    city_state = paste(city, state, sep = ", ")) %>%
+   mutate(
+    city_state = if_else(city_state == "Tulsa, AL", "Tulsa, OK", city_state))  %>%
+  group_by(city_state) %>%
+  summarize(
+    homicides_total = n(),
+    homicides_unresolved = sum(disposition != "Closed by arrest"))
+```
+
+The proportion (w/ confidence limits) of homicides that are unsolved in Baltimore, MD:
+
+```{r}
+baltimore = 
+  city %>%
+  filter(city_state == "Baltimore, MD") 
+
+prop_unresolved =
+  prop.test(
+    x = pull(baltimore, homicides_unresolved), 
+    n = pull(baltimore, homicides_total))
+
+prop_unresolved %>%
+  broom::tidy() %>%
+  select(estimate, conf.low, conf.high) %>%
+  knitr::kable(
+    col.names = c('Estimated Proportion', 'Lower Confidence Limit', 'Upper Confidence Limit'))
+```
+
+The proportion (with confidence limits) of homicides that are unsolved in all cities:
+
+```{r}
+city_nest = 
+  city %>% 
+  nest(data = homicides_total:homicides_unresolved)
+
+
+prop_conflimits = function(df) {
+  
+  prop_unresolved =
+  prop.test(
+    x = pull(df, homicides_unresolved), 
+    n = pull(df, homicides_total))
+
+prop_unresolved %>%
+  broom::tidy() %>%
+  select(estimate, conf.low, conf.high)
+}
+
+
+city_nest %>% 
+  mutate(prop_estimates = map(data, prop_conflimits)) %>% 
+  unnest(data, prop_estimates) %>% 
+  rename(
+    prop_unresolved_est = estimate,
+    conf_lower = conf.low,
+    conf_upper = conf.high) -> city_prop
+```
+
+Plot showing the proportion (with confidence limits) of homicides that are unsolved in each city
+
+```{r}
+city_prop %>%
+  mutate(city_state = fct_reorder(city_state, prop_unresolved_est)) %>%
+  ggplot(aes(x = city_state, y = prop_unresolved_est)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf_lower, ymax = conf_upper), width = 0.2) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(
+    title = "Proportion of Unsolved Homicides in U.S. Cities",
+    x = "City",
+    y = "Proportion")
+```
