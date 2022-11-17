@@ -13,6 +13,68 @@ library(forcats)
 knitr::opts_chunk$set(collapse = TRUE, message = FALSE, dpi = 300, fig.width = 7)
 
 ```
+# Problem 1
+
+Tidy dataframe containing subject IDs, study arm, and observations by week:
+
+```{r}
+file_names = list.files(path = "data/problem1", full.names = TRUE)
+```
+
+```{r}
+files = map(file_names, read_csv)
+for (i in 1:20) {
+  
+  if (i < 11) {
+    
+    files[[i]] = files[[i]] %>% 
+      mutate(
+        subject_id = i,
+        arm = "Control"
+      )
+    
+  }
+  
+  else {
+    
+    files[[i]] = files[[i]] %>% 
+      mutate(
+        subject_id = i - 10,
+        arm = "Experimental"
+      )
+  }
+  
+}
+```
+
+```{r}
+result = files %>% 
+  bind_rows() %>% 
+  select(subject_id, everything()) %>% 
+  pivot_longer(
+    week_1:week_8,
+    names_to = "week",
+    names_prefix = "week_",
+    values_to = "observation"
+  ) %>% 
+  mutate(
+    subject_id = as.character(subject_id),
+    week = as.numeric(week)
+  )
+```
+
+```{r}
+result %>% 
+  ggplot(aes(x = week, y = observation, type = subject_id, color = arm)) +
+  geom_line() +
+  labs(
+    x = "Week",
+    y = "Observation Values",
+    color = "Arm",
+    title = "Observations on each subject over time by study arm"
+  )
+```
+Generally the observation values for those in experimental arm (with greater increase over time) are higher than those in control arm. 
 
 # Problem 2 - Homicide Data
 
@@ -21,9 +83,8 @@ homicide =
   read.csv("https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv") 
 ```
 
-The raw data contains `r nrow(homicide)` rows of homicide observations and `r ncol(homicide)` variables: homicide ID, date, the victim's first and last name, age, sex, city, state, latitude, longitude, and disposition. 
+The raw data contains `r nrow(homicide)` rows of homicide observations and `r ncol(homicide)` variables.
 
-Dataframe with the total number of homicides and the number of unsolved homicides in each city:
 
 ```{r}
 city = 
@@ -101,3 +162,110 @@ city_prop %>%
     x = "City",
     y = "Proportion")
 ```
+
+# Problem 3 - Simulation
+
+Generate 5000 datasets with $n=30$, $\alpha=5$, and $\mu=0$:
+
+```{r}
+df = map(1:5000, ~ rnorm(n = 30, mean = 0, sd = 5))
+
+# Set μ=0. 
+```
+
+Create function called `estmean_pvalue` to calculate the estimated mean $\hat{\mu}$ and the p-value arising from a test of H:$\mu=0$ using $\alpha = 0.05$:
+
+```{r}
+estmean_pvalue = function(n_obs = 30, mu, sigma = 5) {
+  
+  x = rnorm(n = n_obs, mean = mu, sd = sigma)
+  tibble(
+    mu_hat = mean(x),
+    p_value = t.test(x, mu = 0)$p.value 
+  )
+  
+}
+```
+
+For each dataset, save $\hat{\mu}$ and the p-value arising from a test of H:$\mu=0$ using $\alpha = 0.05$ using the `estmean_pvalue` function:
+
+```{r}
+mu_0 = 
+  expand_grid(
+    n = 30,
+    mu = 0,
+    sigma = 5,
+    dataset = 1:5000) %>% 
+  mutate(
+    estimates = 
+      map(.x = mu, ~estmean_pvalue(mu = .x))) %>% 
+  unnest(estimates)
+
+mu_0
+```
+
+Repeat the above for $\mu={1,2,3,4,5,6}$:
+
+```{r}
+mu_total = 
+  expand_grid(
+    n = 30,
+    mu = c(1, 2, 3, 4, 5, 6), 
+    sigma = 5,
+    dataset = 1:5000) %>% 
+  mutate(
+    estimates = 
+      map(.x = mu, ~estmean_pvalue(mu = .x))) %>% 
+  unnest(estimates)
+
+mu_total
+```
+
+## Plots
+
+```{r}
+mu_total %>%
+  group_by(mu) %>%
+  summarise(
+    cnt_nullreject = sum(p_value < 0.05),
+    cnt = n()) %>%
+  mutate(
+    prop_nullreject = cnt_nullreject / cnt)  %>% 
+  ggplot(aes(x = mu, y = prop_nullreject)) + 
+  geom_point() + 
+  labs(
+    title = "Null Hypothesis Rejection Proportion by Sample Mean",
+    x = "True Sample Mean μ",
+    y = "Null Hypothesis Rejection Proportion")
+```
+
+As the true sample mean increases, the power increases. When the true sample mean is 1, the power of the test H:$\mu=0$ using $\alpha = 0.05$ is low. However, when the true sample mean increases to 5, the power of the test H:$\mu=0$ using $\alpha = 0.05$ is 1. We can then conclude that larger effect sizes increase power. 
+
+
+```{r}
+mu_total %>%
+  group_by(mu) %>%
+  mutate(avg_mu_hat = mean(mu_hat)) %>%
+  ggplot(aes(x = mu, y = avg_mu_hat)) +
+  geom_point() + 
+  labs(
+    title = "Average Estimated Sample Mean vs. True Sample Mean",
+    x = "True Sample Mean",
+    y = "Avg Estimated Sample Mean")
+```
+
+
+```{r}
+mu_total %>%
+  filter(p_value < 0.05) %>%
+  group_by(mu) %>%
+  mutate(avg_mu_hat = mean(mu_hat)) %>%
+  ggplot(aes(x = mu, y = avg_mu_hat)) +
+  geom_point() + 
+  labs(
+    title = "Average Estimated Sample Mean vs. True Sample Mean",
+    x = "True Sample Mean",
+    y = "Avg Estimated Sample Mean")
+```
+
+The sample average of $\hat{\mu}$ across tests for which the null is rejected approximately equal to the true value of $\mu$ for $\mu$ equaling 4, 5, and 6. The average $\hat{\mu}$ varies from the $\mu$ for $\mu$ equaling 1, 2 and 3. This is because these lower values are closer to the null value of 0. Since the dataset for plot 2 was restricted to only samples for which the null was rejected, the $\mu$ = 1 group has a samples size compared to the $\mu$ = 6 group. We see that a greater sample size results in $\hat{\mu}$ approximately equal to the true value of $\mu$ for higher values of $\mu$. 
